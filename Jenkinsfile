@@ -3,40 +3,38 @@ pipeline {
 
     environment {
         GIT_URL = "https://github.com/designagune/TEST_REPO"
+        EC2_IP = "3.90.3.174" // EC2 인스턴스의 IP 주소 test
+        EC2_USER = "ec2-user" // EC2 인스턴스의 사용자명
     }
+
     stages {
-        stage('Frontend Build') {
-            steps {
-                sh 'docker build -t swerd245/vite-app ./'
+        stage('Build and Deploy to Local') {
+            when {
+                branch 'develop' // develop 브랜치에서만 실행
             }
-        }
-
-        stage('Frontend Deploy') {
             steps {
-                script {
-                    // 80번 포트를 사용 중인 컨테이너 확인 및 중지
-                    def isPortInUse = sh(script: "docker ps -q --filter 'port=8081'", returnStatus: true)
-                    if (isPortInUse == 0) {
-                        sh "docker ps -q --filter 'port=8181' | xargs -r docker stop"
-                    }
-
-                    // 기존 vite-app 컨테이너 확인 및 중지
-                    def isRunning = sh(script: 'docker ps -a -q --filter name=vite-app | grep -q .', returnStatus: true)
-                    if (isRunning == 0) {
-                        sh 'docker stop vite-app && docker rm vite-app'
-                    }
-                }
+                echo 'Build and Deploy to Local'
+                sh 'docker build -t swerd245/vite-app ./'
                 sh 'docker run -d -p 8081:80 --name vite-app swerd245/vite-app'
             }
         }
 
-        stage('Frontend Finish') {
+        stage('Build and Deploy to EC2') {
+            when {
+                branch 'main' // main 브랜치에서만 실행
+            }
             steps {
-		    // 중지된 컨테이너를 삭제
-                    sh 'docker ps -a -q --filter status=exited | xargs -r docker rm'
-                    // dangling 이미지 강제 삭제
-                    sh 'docker images -qf dangling=true | xargs -r docker rmi -f'
+                echo 'Deploying to EC2 Enviroment'
+                script {
+                    sshagent (credentials : ['ec2-user']) {
+                        sh "scp -o StrictHostKeyChecking=no ./Dockerfile ${EC2_USER}@${EC2_IP}:~/"
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker build -t swerd245/vite-app ./'"
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker stop vite-app || true && docker rm vite-app || true'"
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker run -d -p 8081:80 --name vite-app swerd245/vite-app'"
+                    }
+                }
             }
         }
     }
 }
+
