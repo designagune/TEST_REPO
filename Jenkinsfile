@@ -1,44 +1,51 @@
 pipeline {
     agent any
 
-    environment {
-        GIT_URL = "https://github.com/designagune/TEST_REPO"
+    parameters {
+        choice(
+            name: 'DEPLOY_ENV',
+            choices: ['local', 'EC2'],
+            description: 'Choose the deployment environment'
+        )
     }
     stages {
-        stage('Frontend Build') {
+        stage('Initialize') {
             steps {
-                sh 'docker build -t swerd245/vite-app ./'
+                script {
+                    echo "Current branch: ${env.BRANCH_NAME}"
+                }
             }
         }
 
-        stage('Frontend Deploy') {
-            steps {
-                script {
-                    // 80번 포트를 사용 중인 컨테이너 확인 및 중지
-                    def isPortInUse = sh(script: "docker ps -q --filter 'port=8081'", returnStatus: true)
-                    if (isPortInUse == 0) {
-                        sh "docker ps -q --filter 'port=8181' | xargs -r docker stop"
-                    }
 
-                    // 기존 vite-app 컨테이너 확인 및 중지
-                    def isRunning = sh(script: 'docker ps -a -q --filter name=vite-app | grep -q .', returnStatus: true)
-                    if (isRunning == 0) {
-                        sh 'docker stop vite-app && docker rm vite-app'
-                    }
-                }
+        stage('Build and Deploy to Local') {
+            when {
+                expression { env.BRANCH_NAME == 'develop' }
+            }
+            steps {
+                echo 'Build and Deploy to Local Environment'
+                sh 'docker build -t swerd245/vite-app ./'
+                sh 'docker stop vite-app || true'
+                sh 'docker rm vite-app || true'
                 sh 'docker run -d -p 8081:80 --name vite-app swerd245/vite-app'
             }
         }
 
-        stage('Frontend Finish') {
+        stage('Build and Deploy to EC2') {
+            when {
+                expression { env.BRANCH_NAME == 'main' }
+            }
             steps {
-                    // 중지된 컨테이너를 삭제
-                    sh 'docker ps -a -q --filter status=exited | xargs -r docker rm'
-                    // dangling 이미지 강제 삭제
-                    sh 'docker images -qf dangling=true | xargs -r docker rmi -f'
+                echo 'Deploying to EC2 Environment'
+                script {
+                    sshagent(credentials: ['ec2-user']) {
+                        sh "scp -o StrictHostKeyChecking=no ./Dockerfile ${EC2_USER}@${EC2_IP}:~/"
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker build -t swerd245/vite-app ./'"
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker stop vite-app || true && docker rm vite-app || true'"
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker run -d -p 8081:80 --name vite-app swerd245/vite-app'"
+                    }
+                }
             }
         }
     }
 }
-
-
