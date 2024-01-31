@@ -1,13 +1,11 @@
 pipeline {
     agent any
 
-    parameters {
-        choice(
-            name: 'DEPLOY_ENV',
-            choices: ['local', 'EC2'],
-            description: 'Choose the deployment environment'
-        )
+    environment {
+        EC2_IP = "3.90.3.174" // EC2 인스턴스의 IP 주소
+        EC2_USER = "ec2-user" // EC2 인스턴스의 사용자명
     }
+
     stages {
         stage('Initialize') {
             steps {
@@ -16,7 +14,6 @@ pipeline {
                 }
             }
         }
-
 
         stage('Build and Deploy to Local') {
             when {
@@ -39,13 +36,14 @@ pipeline {
                 echo 'Deploying to EC2 Environment'
                 script {
                     sshagent(credentials: ['ec2-user']) {
-                        sh "scp -o StrictHostKeyChecking=no ./Dockerfile ${EC2_USER}@${EC2_IP}:~/"
-                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker build -t swerd245/vite-app ./'"
-                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker stop vite-app || true && docker rm vite-app || true'"
-                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'docker run -d -p 8081:80 --name vite-app swerd245/vite-app'"
+                        // 전체 프로젝트 디렉토리를 EC2 인스턴스로 복사
+                        sh "scp -o StrictHostKeyChecking=no -r . ${EC2_USER}@${EC2_IP}:~/project-directory"
+                        // EC2 인스턴스에서 Docker 이미지 빌드 및 실행
+                        sh "ssh -o StrictHostKeyChecking=no ${EC2_USER}@${EC2_IP} 'cd ~/project-directory && docker build -t swerd245/vite-app ./ && docker stop vite-app || true && docker rm vite-app || true && docker run -d -p 8081:80 --name vite-app swerd245/vite-app'"
                     }
                 }
             }
         }
     }
 }
+
